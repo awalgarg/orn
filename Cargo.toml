@@ -3,4 +3,8 @@ name = "orn"
 version = "0.1.0"
 authors = ["Awal Garg <awalgarg@gmail.com>"]
 
+[[bin]]
+doc = false
+name = "orn"
+
 [dependencies]

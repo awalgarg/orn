@@ -8,11 +8,25 @@ use std::fmt;
 use std::cmp::Ordering;
 use std::ops::{ Sub, Mul, Div, Rem };
 
+
+/// A binding is held by a scope object in a hashmap.
+///
+/// Each binding is uniquely held and owned by one scope.
+///
+/// Note that bindings are what dictate whether something is mutable or not.
+/// Values are always mutable, but bindings are "gates" to their mutation
+/// and access.
 pub struct OrnBinding {
+    /// Indicates whether the binding is mutable or not
     mutable: bool,
+    /// Rc reference to the value pointed at by this binding
     val: Rc<OrnVal>,
 }
 
+/// OrnVal is the generic container for all kinds of types of values that
+/// are possible to exist in userland. References to these are stored in
+/// bindings, and the VM API functions return those references. But we
+/// generally never pass raw OrnVals around.
 pub enum OrnVal {
     Fn {
         identifier: String,
@@ -61,18 +75,35 @@ impl fmt::Display for OrnVal {
     }
 }
 
+/// A stackframe represents a scope object basically. This might get more
+/// things in future, but presently we only put bindings of a scope in it.
 pub struct StackFrame {
+    /// The hashmap storing bindings by their names
     scope: HashMap<String, OrnBinding>,
 }
 
+/// A stack is a stack of frames. Everytime a scope is entered, a stackframe
+/// is created and pushed onto the stack. The stack doesn't take pure ownership
+/// of the frames though, so a stack could be duplicated on the heap and stored
+/// as a "live" environment (which is what closures do).
+/// When any block exits scope, its frame reference is removed from the stack.
 pub struct Stack {
     pub frames: Vec<Rc<RefCell<StackFrame>>>,
+    /// The call_stack vector stores a stack of function names we are presently
+    /// executing under.
+    /// When a function exits scope, its name is removed from the call stack.
     pub call_stack: Vec<(u32, u32, String)>,
 }
 
+/// We use enums instead of strings here because I think enums take lesser space
+/// and just fit generically well. I might be wrong here, but this works fine.
+/// Also provides a bit of type-safety I guess.
 pub enum RuntimeErrorType {
+    /// Indicates use of an un-initialized binding
     ReferenceError,
+    /// Indicates mismatch of types
     TypeError,
+    /// Indicates a problem occurred while initializing a binding
     InitializationError,
 }
 
@@ -92,6 +123,11 @@ impl fmt::Display for RuntimeErrorType {
     }
 }
 
+/// Representation of a runtime error.
+///
+/// Note that we halt execution as soon as an error occurs and the
+/// only "trace" we kept is the call_stack which is kept in the current
+/// stack.
 pub struct RuntimeError {
     pub error_type: RuntimeErrorType,
     pub msg: String,
@@ -99,8 +135,8 @@ pub struct RuntimeError {
     pub column: u32,
 }
 
-type ErrorStack = Vec<RuntimeError>;
-
+/// generic macro to apply a mathematical operation on two ornval references
+#[macro_export]
 macro_rules! operate_on_numbers_magically {
     ($x:expr, $y:expr, $op:expr, $line:expr, $column:expr) => {
         match ($x, $y) {
@@ -143,6 +179,8 @@ macro_rules! operate_on_numbers_magically {
     }
 }
 
+/// generic macro for mathematical comparison of ornvalues
+#[macro_export]
 macro_rules! compare_numbers_magically {
     ($x:expr, $y:expr, $op:expr, $line:expr, $column:expr) => {
         match ($x, $y) {
@@ -167,6 +205,8 @@ macro_rules! compare_numbers_magically {
     }
 }
 
+/// generic macro for checking value or reference equality
+#[macro_export]
 macro_rules! check_value_equality {
     ($self_:ident, $left:expr, $right:expr) => {
         match ($left, $right) {
@@ -182,16 +222,22 @@ macro_rules! check_value_equality {
 }
 
 impl StackFrame {
+    /// Creates a new StackFrame
     pub fn new() -> StackFrame {
         StackFrame { scope: HashMap::new() }
     }
 }
 
 impl Stack {
+    /// Creates a new empty Stack
+    ///
+    /// To evaluate things in the context of this stack, use Stack.eval_expr or Stack.eval_stmt
     pub fn new() -> Stack {
         Stack { frames: vec![Rc::new(RefCell::new(StackFrame::new()))], call_stack: Vec::new() }
     }
-    fn add_binding(&mut self, id: &str, mutable: bool, val: Rc<OrnVal>) {
+
+    /// Adds a binding to the top most frame in the current stack
+    pub fn add_binding(&mut self, id: &str, mutable: bool, val: Rc<OrnVal>) {
         self
             .frames
             .last()
@@ -200,7 +246,9 @@ impl Stack {
             .scope
             .insert(id.to_string(), OrnBinding { mutable: mutable, val: val });
     }
-    fn get_value(&self, id: &str) -> Option<Rc<OrnVal>> {
+
+    /// Traverses entire scope chain to get the value of a binding by name
+    pub fn get_value(&self, id: &str) -> Option<Rc<OrnVal>> {
         for frame_ref in self.frames.iter().rev() {
             let frame: Ref<StackFrame> = frame_ref.as_ref().borrow();
             match frame.scope.get(id) {
@@ -210,21 +258,28 @@ impl Stack {
         }
         None
     }
+
+    /// Given a reference to a statement object, this function clones it and evaluates it
+    /// under the current execution context
     pub fn eval_stmt(&mut self, stmt: &Statement) -> Result<Rc<OrnVal>, RuntimeError> {
         match (*stmt).clone() {
             Statement::ExpressionStatement(expr_source) => {
                 let line = expr_source.line;
                 let column = expr_source.column;
                 match expr_source.expr {
+                    // function expressions in statements are treated as special since they
+                    // are a binding too (an immutable one)
                     Expression::Fn { identifier, params, return_type, body } => {
+                        // get current scope frame
                         let mut frame = self
                                             .frames
                                             .last()
                                             .expect("getting last frame while parsing fn expression statement")
                                             .as_ref()
                                             .borrow_mut();
+                        // check if a binding with the same name already exists
                         match frame.scope.get(&identifier) {
-                            Some(_) => {
+                            Some(_) => { // bail if so
                                 return Err(RuntimeError {
                                     error_type: RuntimeErrorType::InitializationError,
                                     line: line,
@@ -232,7 +287,7 @@ impl Stack {
                                     msg: format!("There is already a binding by the name \"{}\" in scope. Pick another name?", identifier),
                                 });
                             },
-                            None => {
+                            None => { // else create new binding!
                                 let val = Rc::new(OrnVal::Fn {
                                     identifier: identifier.clone(),
                                     params: params,
@@ -243,11 +298,12 @@ impl Stack {
                                     env: self.frames.iter().map(|x| x.clone()).collect::<Vec<_>>(),
                                 });
                                 frame.scope.insert(identifier, OrnBinding { mutable: false, val: val.clone() });
+                                // return a reference to the created ornval
                                 return Ok(val);
                             },
                         }
                     },
-                    _ => {
+                    _ => { // just return the result of evaluating the expression as is
                         self.eval_expr(&expr_source)
                     },
                 }
@@ -261,18 +317,19 @@ impl Stack {
             },
             Statement::Empty => {
                 // make fun of javascript
-                unreachable!();
+                unimplemented!();
             },
         }
     }
+
+    /// Given a reference to an expression, this function clones and evaluates the expression
+    /// in the current execution context
     fn eval_expr(&mut self, expr_source: &ExpressionSource) -> Result<Rc<OrnVal>, RuntimeError> {
         let line = expr_source.line;
         let column = expr_source.column;
         let expr = (*expr_source).expr.clone();
         match expr {
             Expression::Fn { identifier, return_type, params, body } => {
-                // if datatype is INFER, then try inferring it
-                // then just return as is mostly :|
                 return Ok(Rc::new(OrnVal::Fn {
                     identifier: identifier,
                     return_type: return_type,
@@ -576,11 +633,12 @@ impl Stack {
                 return Ok(Rc::new(OrnVal::Bool(b)));
             },
             Expression::Block(ref block) => {
-                // evaluate each expression in a stack and return last expression's value somehow?
                 return self.eval_block(block);
             },
         }
     }
+
+    /// Given a reference to a block, this function clones it and evaluates it
     pub fn eval_block(&mut self, block: &Block) -> Result<Rc<OrnVal>, RuntimeError> {
         let new_frame = StackFrame::new();
         self.frames.push(Rc::new(RefCell::new(new_frame)));

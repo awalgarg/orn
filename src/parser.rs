@@ -8,29 +8,63 @@ use lexer::{ Token, Lexeme, Keyword, Lexer };
 // Preserving source structure is not the aim here, but correctly mapping to interpretable
 // instructions while preserving behavior is.
 
+
+/// A Statement is a wrapper for top level expressions and let bindings
+///
+/// Note: When make like rules are implemented, those will be wrapped as statements too
 #[derive(Clone)]
 pub enum Statement {
+    /// A let binding statement
     Let { mutable: bool, identifier: String, data_type: DataType, initializer: ExpressionSource },
+    /// A statement variant to wrap an expression
     ExpressionStatement(ExpressionSource),
     Empty,
     // TODO: add rule statement
 }
 
+/// An Expression representation
 #[derive(Clone)]
 pub enum Expression {
+    /// A function expression contains an identifier (even for expression functions, yes),
+    /// a list of parameters, a return type, and body
     Fn { identifier: String, params: Vec<FunctionParameter>, return_type: DataType, body: Block },
+
+    /// A Binary expression is an expression with an operator operating on two expressions
     Binary { left: Box<ExpressionSource>, operator: BinaryOperator, right: Box<ExpressionSource> },
+
+    /// A Unary expression is an expression with an operator operating on a single expression
     Unary { operator: UnaryOperator, argument: Box<ExpressionSource> },
+
+    /// If expressions are denoted by a vector of tuples of conditions and consequences
+    /// An "else" block is denoted by constructing a fake truthy expression and pushing it to the
+    /// end of this vector
     If(Vec<(ExpressionSource, Block)>),
+
+    /// An assignment expression is denoted by a reference string and the value expression
+    /// which should be evaluated to assign to the reference
     Assignment { left: String, right: Box<ExpressionSource> },
+
+    /// Denotes a reference
     Reference(String),
+
+    /// A call expression is denoted by a callee expression and the arguments to be passed to it
     Call { callee: Box<ExpressionSource>, args: Vec<ExpressionSource> },
+
+    /// Literal expression for string
     StringLiteral(String),
+
+    /// Literal expression for numbers
     NumberLiteral(String),
+
+    /// Literal expressions for booleans
     BooleanLiteral(bool),
+
+    /// Block expressions just hold blocks, which is a type alias for vectors of statements
     Block(Block),
 }
 
+
+/// Wrapper type over expressions to store their locations
 #[derive(Clone)]
 pub struct ExpressionSource {
     pub line: u32,
@@ -38,6 +72,7 @@ pub struct ExpressionSource {
     pub expr: Expression,
 }
 
+/// Alias type block which is literally just a vector of statements
 pub type Block = Vec<Statement>;
 
 #[derive(Clone)]
@@ -152,6 +187,10 @@ macro_rules! punctuator_to_unary_operator {
     }
 }
 
+/// Source parser for Orn
+///
+/// The parser works by consuming a token stream from a Lexer.
+/// The lexer is stored as a peekable iterator.
 pub struct Parser<'a> {
     lexer: Peekable<Lexer<'a>>,
 }
@@ -164,6 +203,10 @@ fn extract_token_ref<'a>(lexeme: &'a Lexeme) -> &'a Token {
     &lexeme.token
 }
 
+
+/// Asserts that the next token in the token stream matches the passed pattern.
+/// Consumes the token and returns nothing.
+#[macro_export]
 macro_rules! expect_and_consume_token {
     ($self_:ident, $token_pattern:pat, $failure_msg:expr) => {
         let lexeme = match $self_.lexer.next() {
@@ -189,6 +232,9 @@ macro_rules! expect_and_consume_token {
     };
 }
 
+/// Asserts that the next token is an identifier, and returns it after consumption
+/// from the token stream.
+#[macro_export]
 macro_rules! expect_identifier {
     ($self_:ident, $failure_msg:expr) => {
         {
@@ -217,6 +263,9 @@ macro_rules! expect_identifier {
     }
 }
 
+/// Asserts that the next token is a valid data type and returns it after
+/// consumption from the token stream
+#[macro_export]
 macro_rules! expect_datatype {
     ($self_:ident, $failure_msg:expr) => {
         {
@@ -255,6 +304,9 @@ macro_rules! expect_datatype {
     }
 }
 
+/// Checks whether the next token matches a pattern or not. Consumes the token
+/// if the test passes and returns true, else returns false without consuming anything
+#[macro_export]
 macro_rules! check_and_consume_token {
     ($self_:ident, $token_pattern:pat) => {
         if let Some(&$token_pattern) = $self_.lexer.peek().map(extract_token_ref) {
@@ -266,6 +318,9 @@ macro_rules! check_and_consume_token {
     }
 }
 
+/// Matches ": DataType" and returns the data type as a token, after consumption
+/// else returns DataType::INFER
+#[macro_export]
 macro_rules! check_and_consume_punctuated_datatype {
     ($self_:ident) => {
         if let Some(&Token::Punctuator(':')) = $self_.lexer.peek().map(extract_token_ref) {
@@ -277,6 +332,9 @@ macro_rules! check_and_consume_punctuated_datatype {
     }
 }
 
+/// Asserts that the next token matches a given pattern, and returns current location
+/// before consumption of the token
+#[macro_export]
 macro_rules! expect_token_and_retrieve_location {
     ($self_:ident, $token_pattern:pat, $failure_msg:expr) => {
         match $self_.lexer.next() {
@@ -302,6 +360,8 @@ macro_rules! expect_token_and_retrieve_location {
     }
 }
 
+/// Returns current location in the lexing machine
+#[macro_export]
 macro_rules! current_location {
     ($self_:ident) => {
         match $self_.lexer.peek() {
@@ -316,11 +376,15 @@ macro_rules! current_location {
 }
  
 impl<'a> Parser<'a> {
+    /// Returns a new Parser machine
+    ///
+    /// Expects a buffer String as source
     pub fn new(src: &'a String) -> Parser<'a> {
         Parser { lexer: Lexer::new(src).peekable() }
     }
-    
-    fn match_let_stmt(&mut self) -> Result<Statement, SyntaxError> {
+
+    /// Matches a let statement and returns `Statement::Let`
+    pub fn match_let_stmt(&mut self) -> Result<Statement, SyntaxError> {
         expect_token_and_retrieve_location!(self, Token::Keyword(Keyword::Let), "I was told to expect a let binding :|");
 
         // check if next is mut
@@ -343,7 +407,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn match_fn_expr(&mut self) -> Result<ExpressionSource, SyntaxError> {
+    pub fn match_fn_expr(&mut self) -> Result<ExpressionSource, SyntaxError> {
         let (line, column) = expect_token_and_retrieve_location!(self, Token::Keyword(Keyword::Fn), "I was told to expect a function :|");
 
         let id = expect_identifier!(self, "What should the function's name be? :)");
@@ -396,7 +460,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn match_if_expr(&mut self) -> Result<ExpressionSource, SyntaxError> {
+    pub fn match_if_expr(&mut self) -> Result<ExpressionSource, SyntaxError> {
         let (line, column) = expect_token_and_retrieve_location!(self, Token::Keyword(Keyword::If), "I was told to expect an if chain :|");
 
         let mut cases: Vec<(ExpressionSource, Block)> = vec![];
@@ -436,7 +500,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn match_block_stmt(&mut self, failure_msg: &'static str) -> Result<Block, SyntaxError> {
+    pub fn match_block_stmt(&mut self, failure_msg: &'static str) -> Result<Block, SyntaxError> {
         expect_and_consume_token!(self, Token::Punctuator('{'), failure_msg);
         self.continue_block_stmt()
     }
@@ -467,7 +531,11 @@ impl<'a> Parser<'a> {
         unimplemented!();
     }
 
-    fn match_expression(&mut self) -> Result<ExpressionSource, SyntaxError> {
+    /// Matches an expression in a context-less fashion
+    ///
+    /// It greedily consumes the token stream until it can no longer continue
+    /// to match a single expression, and returns the expression so far matched
+    pub fn match_expression(&mut self) -> Result<ExpressionSource, SyntaxError> {
         // this is really really hard, but lets see
         // we need an operable terminal to start with. lets call it expr
         // an operable expr is like a "complete" token on which you can make
