@@ -556,6 +556,7 @@ impl Stack {
                         for stmt in body.iter() {
                             res = try!(stack.eval_stmt(stmt));
                         }
+                        self.call_stack.pop();
                         return Ok(res);
                     },
                     ref crap => {
