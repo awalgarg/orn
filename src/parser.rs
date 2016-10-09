@@ -48,6 +48,7 @@ pub enum BinaryOperator {
     Divide,
     Modulo,
     Equals,
+    Unequals,
     LessThan,
     GreaterThan,
     LessThanOrEqualTo,
@@ -637,7 +638,7 @@ impl<'a> Parser<'a> {
                         }
                     }
                 },
-                Some(&Token::Punctuator(ch)) if ch == '+' || ch == '-' || ch == '*' || ch == '/' || ch == '%' || ch == '>' || ch == '<' || ch == '|' || ch == '&' => {
+                Some(&Token::Punctuator(ch)) if ch == '+' || ch == '-' || ch == '*' || ch == '/' || ch == '%' || ch == '>' || ch == '<' || ch == '|' || ch == '&' || ch == '!' => {
                     // binary expression
                     // Note that we already covered assignment and binary equality operator above
                     let op = match self.lexer.next().map(extract_token) {
@@ -669,6 +670,10 @@ impl<'a> Parser<'a> {
                         Some(Token::Punctuator('&')) => {
                             expect_and_consume_token!(self, Token::Punctuator('&'), "Surely you meant to use the && (logical and) operator? Because orn has no bitwise and."); // completes && (and)
                             BinaryOperator::And
+                        },
+                        Some(Token::Punctuator('!')) => {
+                            expect_and_consume_token!(self, Token::Punctuator('='), "Negation is a unary operator. After an expression, != forms the unequality operator!");
+                            BinaryOperator::Unequals
                         },
                         _ => { unreachable!(); }
                     };

@@ -167,6 +167,20 @@ macro_rules! compare_numbers_magically {
     }
 }
 
+macro_rules! check_value_equality {
+    ($self_:ident, $left:expr, $right:expr) => {
+        match ($left, $right) {
+            (&OrnVal::Str(ref x), &OrnVal::Str(ref y)) => { x == y },
+            (&OrnVal::Bool(ref x), &OrnVal::Bool(ref y)) => { x == y },
+            (&OrnVal::UInt(ref x), &OrnVal::UInt(ref y)) => { x == y },
+            (&OrnVal::Int(ref x), &OrnVal::Int(ref y)) => { x == y },
+            (&OrnVal::Float(ref x), &OrnVal::Float(ref y)) => { x == y },
+            (x @ &OrnVal::Fn { .. }, y @ &OrnVal::Fn { .. }) => { &*x as *const _ == &*y as *const _ },
+            (&_, &_) => { false },
+        }
+    }
+}
+
 impl StackFrame {
     pub fn new() -> StackFrame {
         StackFrame { scope: HashMap::new() }
@@ -313,34 +327,10 @@ impl Stack {
                 let right = try!(self.eval_expr(right.borrow()));
                 match operator {
                     BinaryOperator::Equals => {
-                        // this is complicated
-                        // evaluate both left and right
-                        // check types. if types are different, return false
-                        // if types are literals, do simple equality check and return result
-                        // else check if both are the same objects (do we even have those?)
-                        match (left.borrow(), right.borrow()) {
-                            (&OrnVal::Str(ref x), &OrnVal::Str(ref y)) => {
-                                return Ok(Rc::new(OrnVal::Bool(x == y)));
-                            },
-                            (&OrnVal::Bool(ref x), &OrnVal::Bool(ref y)) => {
-                                return Ok(Rc::new(OrnVal::Bool(x == y)));
-                            },
-                            (&OrnVal::UInt(ref x), &OrnVal::UInt(ref y)) => {
-                                return Ok(Rc::new(OrnVal::Bool(x == y)));
-                            },
-                            (&OrnVal::Int(ref x), &OrnVal::Int(ref y)) => {
-                                return Ok(Rc::new(OrnVal::Bool(x == y)));
-                            },
-                            (&OrnVal::Float(ref x), &OrnVal::Float(ref y)) => {
-                                return Ok(Rc::new(OrnVal::Bool(x == y)));
-                            },
-                            (x @ &OrnVal::Fn { .. }, y @ &OrnVal::Fn { .. }) => {
-                                return Ok(Rc::new(OrnVal::Bool(&*x as *const _ == &*y as *const _)));
-                            },
-                            (&_, &_) => {
-                                return Ok(Rc::new(OrnVal::Bool(false)));
-                            },
-                        }
+                        return Ok(Rc::new(OrnVal::Bool(check_value_equality!(self, left.borrow(), right.borrow()))));
+                    },
+                    BinaryOperator::Unequals => {
+                        return Ok(Rc::new(OrnVal::Bool(!check_value_equality!(self, left.borrow(), right.borrow()))));
                     },
                     BinaryOperator::Add => {
                         match (left.borrow(), right.borrow()) {
@@ -416,7 +406,9 @@ impl Stack {
                         let r = compare_numbers_magically!(left.borrow(), right.borrow(), PartialOrd::partial_cmp, line, column).unwrap();
                         return Ok(Rc::new(OrnVal::Bool(r == Ordering::Less || r == Ordering::Equal)));
                     },
-                    _ => { unreachable!(); },
+                    BinaryOperator::Or | BinaryOperator::And => {
+                        unreachable!();
+                    },
                 }
             },
             Expression::Unary { operator, argument } => {
