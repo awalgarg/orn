@@ -48,10 +48,17 @@ echo(subtract_1(55)) # prints 54
 ### Usage
 
 *orn* is written in Rust. As such, it is distributed as a single binary
-which you can drop in your `$PATH` and start writing shell scripts.
+which you can drop in your `$PATH` and start writing shell scripts. To run
+them, just pass the path to your script as the first argument to `orn`.
+Alternatively, you could use shebangs and mark your scripts as executables.
 
 To compile the *orn* interpreter yourself, you need cargo. Clone the
 source code and run `cargo build --release`, and copy `target/release/orn`.
+To build a dynamically linked binary, you can use this:
+
+```
+cargo rustc --release --bin orn -- -C prefer-dynamic
+```
 
 ### TODO
 
