@@ -329,6 +329,8 @@ impl Stack {
         let column = expr_source.column;
         let expr = (*expr_source).expr.clone();
         match expr {
+            // a function expression is just copied to an ornval with the environment
+            // and returned as is. not much sideeffects going on here
             Expression::Fn { identifier, return_type, params, body } => {
                 return Ok(Rc::new(OrnVal::Fn {
                     identifier: identifier,
@@ -340,15 +342,26 @@ impl Stack {
                     column: column,
                 }));
             },
+
+            // binary expression evaluation!
             Expression::Binary { left, operator, right } => {
+                // first evaluate the left side which is important
                 let left = try!(self.eval_expr(left.borrow()));
+
+                // check if the operator is a logical type
+                // in which case we short-circuit the evaluation of the right hand
+                // side so that it is evaluated only if required
                 match operator {
+                    // in case of or
                     BinaryOperator::Or => {
                         match left.borrow() {
+                            // we stop evaluation if left side is true
                             &OrnVal::Bool(true) => {
                                 return Ok(Rc::new(OrnVal::Bool(true)));
                             },
+                            // but continue evaluation if right side isn't
                             &OrnVal::Bool(false) => {
+                                // TODO: type check for boolean
                                 return self.eval_expr(right.borrow());
                             },
                             silly => {
@@ -361,11 +374,15 @@ impl Stack {
                             },
                         }
                     },
+                    // in case of and
                     BinaryOperator::And => {
                         match left.borrow() {
+                            // we continue evaluation only if the left side is true
                             &OrnVal::Bool(true) => {
+                                // TODO: type check as boolean?
                                 return self.eval_expr(right.borrow());
                             },
+                            // and return false early otherwise
                             &OrnVal::Bool(false) => {
                                 return Ok(Rc::new(OrnVal::Bool(false)));
                             },
@@ -379,8 +396,11 @@ impl Stack {
                             },
                         }
                     },
+                    // continue further execution for other operators
                     _ => {},
                 }
+                // for all other operators, we absolutely need both left and right, so evalute
+                // right hand side expression too now
                 let right = try!(self.eval_expr(right.borrow()));
                 match operator {
                     BinaryOperator::Equals => {
@@ -464,10 +484,14 @@ impl Stack {
                         return Ok(Rc::new(OrnVal::Bool(r == Ordering::Less || r == Ordering::Equal)));
                     },
                     BinaryOperator::Or | BinaryOperator::And => {
+                        // since we just operated for these two logical operators above, they will
+                        // not be matched again
                         unreachable!();
                     },
                 }
             },
+
+            // simple unary expressions!
             Expression::Unary { operator, argument } => {
                 let arg = try!(self.eval_expr(&argument));
                 match operator {
@@ -506,11 +530,15 @@ impl Stack {
                     UnaryOperator::Add => {
                         // evaluate expression and type check to ensure it is numerical
                         // return evaluated value
+                        // TODO: reconsider if this is really needed?
                         unimplemented!();
                     },
                 }
             },
+
+            // conditionals! yay!
             Expression::If(cases) => {
+                // for each condition and consequence pair in cases...
                 for (ref condition, ref consequence) in cases {
                     // evaluate condition and type check to ensure it is boolean
                     // if it is true, evaluate consequence in its own block and return
@@ -518,6 +546,7 @@ impl Stack {
                         &OrnVal::Bool(true) => {
                             return self.eval_block(consequence);
                         },
+                        // otherwise check next condition
                         &OrnVal::Bool(false) => { continue; },
                         _ => {
                             return Err(RuntimeError {
@@ -529,14 +558,12 @@ impl Stack {
                         }
                     }
                 }
+                // until everything fails, at which point we return false
                 return Ok(Rc::new(OrnVal::Bool(false)));
             },
+
             Expression::Assignment { ref left, ref right } => {
-                // obtain pointer reference to left string
-                // check if it is marked mutable
-                // evaluate right expression
-                // set value of left to right
-                // return evaluated value
+                // TODO: value should be evaluted after checking binding presence
                 let val = try!(self.eval_expr(right));
                 for stack_ref in self.frames.iter().rev() {
                     let mut stack = stack_ref.borrow_mut();
@@ -566,6 +593,7 @@ impl Stack {
                     msg: format!("Variable {} is not defined kid.", left),
                 });
             },
+
             Expression::Reference(ref id) => {
                 // obtain pointer reference to id and return its value
                 return self.get_value(id).ok_or(RuntimeError {
@@ -575,6 +603,7 @@ impl Stack {
                     msg: format!("reference error bro. {} is not defined", id),
                 });
             },
+
             Expression::Call { callee, args } => {
                 // TODO: lol this is a terrible hack
                 // FIXME when we get a real standard library
@@ -587,24 +616,51 @@ impl Stack {
                     },
                     _ => {},
                 };
+
+                // evaluate callee to obtain reference to function
                 let f = try!(self.eval_expr(callee.borrow()));
                 match f.borrow() {
+                    // if it is indeed a function...
                     &OrnVal::Fn { ref params, ref body, ref identifier, ref env, ref line, ref column, .. } => {
+                        // push function name and location to call stack
                         self.call_stack.push((*line, *column, identifier.to_string()));
+
+                        // assert adequate number of arguments are passed
                         assert_eq!(args.len(), params.len());
+
+                        // TODO: type check parameter types to match arguments passed!
+
+                        // create a new stack frame for storing arguments and a reference to the
+                        // function itself
                         let mut call_frame = StackFrame::new();
+                        // TODO: also add function itself to this frame to allow recursion in
+                        // function expressions
+
+                        // push each argument passed by its name from the corresponding parameter
+                        // to the above frame
                         for (arg, param) in args.iter().zip(params.iter()) {
                             call_frame.scope.insert(param.name.clone(), OrnBinding { mutable: false, val: try!(self.eval_expr(arg)) });
                         }
+
+                        // create a new stack for execution
                         let mut stack = Stack::new();
+
+                        // restore environment of function to where it was declared
                         for frame in env.iter() {
                             stack.frames.push(frame.clone());
                         }
+
+                        // add our argument frame to the above stack
                         stack.frames.push(Rc::new(RefCell::new(call_frame)));
+
+                        // start execution and record result of each statement (to return last one
+                        // in the end)
                         let mut res = Rc::new(OrnVal::Bool(false));
                         for stmt in body.iter() {
                             res = try!(stack.eval_stmt(stmt));
                         }
+
+                        // remove the added entry to call stack before exiting
                         self.call_stack.pop();
                         return Ok(res);
                     },
@@ -618,9 +674,11 @@ impl Stack {
                     }
                 }
             },
+
             Expression::StringLiteral(ref s) => {
                 return Ok(Rc::new(OrnVal::Str(s.clone())));
             },
+
             Expression::NumberLiteral(ref n) => {
                 // parse n as number and return value
                 if n.contains('.') {
@@ -629,9 +687,11 @@ impl Stack {
                     return Ok(Rc::new(OrnVal::UInt(n.parse::<u32>().unwrap_or(0))));
                 }
             },
+
             Expression::BooleanLiteral(b) => {
                 return Ok(Rc::new(OrnVal::Bool(b)));
             },
+
             Expression::Block(ref block) => {
                 return self.eval_block(block);
             },
@@ -640,12 +700,20 @@ impl Stack {
 
     /// Given a reference to a block, this function clones it and evaluates it
     pub fn eval_block(&mut self, block: &Block) -> Result<Rc<OrnVal>, RuntimeError> {
+        // create a new stack frame
         let new_frame = StackFrame::new();
+
+        // push the frame to current execution context
         self.frames.push(Rc::new(RefCell::new(new_frame)));
+
+        // variable to record value of each statement execution so we can return the result of the
+        // last successfully executed statement as return value of the block
         let mut ret = Ok(Rc::new(OrnVal::Bool(false)));
         for stmt in block.iter() {
             ret = self.eval_stmt(stmt);
         }
+
+        // remove frame from the execution context
         self.frames.pop();
         return ret;
     }
