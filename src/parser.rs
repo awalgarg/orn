@@ -1,4 +1,5 @@
 use std::iter::Peekable;
+use std::fmt;
 
 use lexer::{ Token, Lexeme, Keyword, Lexer };
 
@@ -7,7 +8,6 @@ use lexer::{ Token, Lexeme, Keyword, Lexer };
 // Preserving source structure is not the aim here, but correctly mapping to interpretable
 // instructions while preserving behavior is.
 
-#[derive(Debug)]
 #[derive(Clone)]
 pub enum Statement {
     Let { mutable: bool, identifier: String, data_type: DataType, initializer: ExpressionSource },
@@ -16,7 +16,6 @@ pub enum Statement {
     // TODO: add rule statement
 }
 
-#[derive(Debug)]
 #[derive(Clone)]
 pub enum Expression {
     Fn { identifier: String, params: Vec<FunctionParameter>, return_type: DataType, body: Block },
@@ -32,7 +31,6 @@ pub enum Expression {
     Block(Block),
 }
 
-#[derive(Debug)]
 #[derive(Clone)]
 pub struct ExpressionSource {
     pub line: u32,
@@ -42,7 +40,6 @@ pub struct ExpressionSource {
 
 pub type Block = Vec<Statement>;
 
-#[derive(Debug)]
 #[derive(Clone)]
 pub enum BinaryOperator {
     Add,
@@ -59,7 +56,6 @@ pub enum BinaryOperator {
     And,
 }
 
-#[derive(Debug)]
 #[derive(Clone)]
 pub enum UnaryOperator {
     Add,
@@ -67,14 +63,18 @@ pub enum UnaryOperator {
     Negate,
 }
 
-#[derive(Debug)]
 #[derive(Clone)]
 pub struct FunctionParameter {
     pub name: String,
     pub data_type: DataType,
 }
 
-#[derive(Debug)]
+impl fmt::Display for FunctionParameter {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}: {}", self.name, self.data_type)
+    }
+}
+
 #[derive(Clone)]
 pub enum DataType {
     UInt,
@@ -86,7 +86,19 @@ pub enum DataType {
     INFER,
 }
 
-#[derive(Debug)]
+impl fmt::Display for DataType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &DataType::UInt => { write!(f, "uint") },
+            &DataType::Int => { write!(f, "int") },
+            &DataType::Str => { write!(f, "str") },
+            &DataType::Float => { write!(f, "float") },
+            &DataType::Bool => { write!(f, "bool") },
+            &DataType::INFER => { write!(f, "infer") },
+        }
+    }
+}
+
 pub struct SyntaxError {
     pub line: u32,
     pub column: u32,
@@ -225,7 +237,7 @@ macro_rules! expect_datatype {
                             return Err(SyntaxError {
                                 line: lexeme.line,
                                 column: lexeme.column,
-                                msg: format!("Unexpected keyword {:?}. Expected data type. {}", k, $failure_msg),
+                                msg: format!("Unexpected keyword {}. Expected data type. {}", k, $failure_msg),
                             });
                         },
                     }
@@ -274,7 +286,7 @@ macro_rules! expect_token_and_retrieve_location {
                     return Err(SyntaxError {
                         line: lex.line,
                         column: lex.column,
-                        msg: format!("Unexpected {:?}. Expected {:?}. {}", lex.token, stringify!($token_pattern), $failure_msg),
+                        msg: format!("Unexpected {}. Expected {}. {}", lex.token, stringify!($token_pattern), $failure_msg),
                     });
                 }
             },
@@ -282,7 +294,7 @@ macro_rules! expect_token_and_retrieve_location {
                 return Err(SyntaxError {
                     line: 0,
                     column: 0,
-                    msg: format!("Unexpected EOF. Expected {:?}. {}", stringify!($token_pattern), $failure_msg),
+                    msg: format!("Unexpected EOF. Expected {}. {}", stringify!($token_pattern), $failure_msg),
                 });
             },
         }

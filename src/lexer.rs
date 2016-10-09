@@ -3,7 +3,6 @@ use std::fmt;
 
 // wrapper for characters
 // useful for tracing position of error in source text
-#[derive(Debug)]
 struct SourceChar {
     ch: char,
     line: u32,
@@ -11,7 +10,6 @@ struct SourceChar {
 }
 
 // simple scanner which can be rewinded by one character only
-#[derive(Debug)]
 struct Scanner<'a> {
     source: Chars<'a>,
     line: u32,
@@ -58,7 +56,6 @@ impl<'a> Iterator for Scanner<'a> {
 
 // tokens are basically source lexemes split by whitespace but more intelligent splitting
 // and also assigned with "Tags" in this enum
-#[derive(Debug)]
 pub enum Token {
     StringLiteral(String),
     NumberLiteral(String), // the exact number type is known later in the parse pipeline
@@ -81,7 +78,7 @@ impl fmt::Display for Token {
                 write!(f, "{}", b)
             },
             &Token::Keyword(ref k) => {
-                write!(f, "{:?}", k)
+                write!(f, "{}", k)
             },
             &Token::Unknown(ref s) => {
                 write!(f, "{}", s)
@@ -93,14 +90,12 @@ impl fmt::Display for Token {
     }
 }
 
-#[derive(Debug)]
 pub struct Lexeme {
     pub line: u32,
     pub column: u32,
     pub token: Token,
 }
 
-#[derive(Debug)]
 pub enum Keyword {
     If,
     Else,
@@ -112,6 +107,23 @@ pub enum Keyword {
     Str,
     Float,
     Bool,
+}
+
+impl fmt::Display for Keyword {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &Keyword::If => { write!(f, "if") },
+            &Keyword::Else => { write!(f, "else") },
+            &Keyword::Fn => { write!(f, "fn") },
+            &Keyword::Let => { write!(f, "let") },
+            &Keyword::Mut => { write!(f, "mut") },
+            &Keyword::UInt => { write!(f, "uint") },
+            &Keyword::Int => { write!(f, "int") },
+            &Keyword::Str => { write!(f, "str") },
+            &Keyword::Float => { write!(f, "float") },
+            &Keyword::Bool => { write!(f, "bool") },
+        }
+    }
 }
 
 fn identify_token(token: String) -> Token {
@@ -148,7 +160,6 @@ fn identify_token(token: String) -> Token {
 
 // Bunch of states in which the lexer could be (which denotes what it could be consuming)
 // So LexerState::Comment means the lexer is presently consuming a comment token
-#[derive(Debug)]
 enum LexerState {
     Idle,
     StringLiteral { quote: char },
@@ -163,7 +174,6 @@ macro_rules! wrap_as_lexeme {
     }
 }
 
-#[derive(Debug)]
 pub struct Lexer<'a> {
     scanner: Scanner<'a>,
     accepting: LexerState,
@@ -258,7 +268,7 @@ impl<'a> Iterator for Lexer<'a> {
                                 self.accepting = LexerState::Comment;
                             } else if !ch.is_whitespace() {
                                 // TODO: handle error properly
-                                println!("Unknown character {:?} encountered", ch);
+                                println!("Unknown character {} at line {} column {} encountered", ch, self.line, self.column);
                             }
                         },
                         LexerState::StringLiteral { quote } => {

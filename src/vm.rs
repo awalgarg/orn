@@ -8,13 +8,11 @@ use std::fmt;
 use std::cmp::Ordering;
 use std::ops::{ Sub, Mul, Div, Rem };
 
-#[derive(Debug)]
 pub struct OrnBinding {
     mutable: bool,
     val: Rc<OrnVal>,
 }
 
-#[derive(Debug)]
 pub enum OrnVal {
     Fn {
         identifier: String,
@@ -36,7 +34,13 @@ impl fmt::Display for OrnVal {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             &OrnVal::Fn { ref identifier, ref params, ref return_type, .. } => {
-                write!(f, "fn {} ({:?}) -> {:?}", identifier, params, return_type)
+                write!(
+                    f,
+                    "fn {} ({}) -> {}",
+                    identifier,
+                    params.iter().map(|param| param.to_string()).collect::<Vec<_>>().join(", "),
+                    return_type
+                )
             },
             &OrnVal::Str(ref s) => {
                 write!(f, "\"{}\"", s)
@@ -48,7 +52,7 @@ impl fmt::Display for OrnVal {
                 write!(f, "{}", i)
             },
             &OrnVal::Float(fl) => {
-                write!(f, "{:?}", fl)
+                write!(f, "{}", fl)
             },
             &OrnVal::Bool(b) => {
                 write!(f, "{}", b)
@@ -57,18 +61,15 @@ impl fmt::Display for OrnVal {
     }
 }
 
-#[derive(Debug)]
 pub struct StackFrame {
     scope: HashMap<String, OrnBinding>,
 }
 
-#[derive(Debug)]
 pub struct Stack {
     pub frames: Vec<Rc<RefCell<StackFrame>>>,
     pub call_stack: Vec<(u32, u32, String)>,
 }
 
-#[derive(Debug)]
 pub enum RuntimeErrorType {
     ReferenceError,
     TypeError,
@@ -91,7 +92,6 @@ impl fmt::Display for RuntimeErrorType {
     }
 }
 
-#[derive(Debug)]
 pub struct RuntimeError {
     pub error_type: RuntimeErrorType,
     pub msg: String,
