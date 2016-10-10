@@ -18,20 +18,26 @@ fn main() {
     // if second arg was not passed
     if args.len() < 2 {
         // drop to a repl
+        const FAILURE_COLOR_CODE: &'static str = "\x1B[91m";
+        const OK_COLOR_CODE: &'static str = "\x1B[32m";
+        const OK_BLUE_CODE: &'static str = "\x1B[94m";
+        const CLEAR_COLOR: &'static str = "\x1B[0m";
+
         println!("Welcome to the orn repl. Autocompletion and history are a WIP. Use Ctrl+C to exit. Enjoy!");
-        print!("> ");
-        io::stdout().flush();
+        print!("{}>{} ", OK_BLUE_CODE, CLEAR_COLOR);
+        io::stdout().flush().unwrap();
+
         let mut stack = Stack::new();
         loop {
             let mut input = String::new();
             match io::stdin().read_line(&mut input) {
                 Ok(_) => {
                     match stack.eval(&input) {
-                        Ok(val) => { println!("{}", val); },
-                        Err(er) => { println!("{}", er); },
+                        Ok(val) => { println!("{}{}{}", OK_COLOR_CODE, val, CLEAR_COLOR); },
+                        Err(er) => { println!("{}{}{}", FAILURE_COLOR_CODE, er, CLEAR_COLOR); },
                     }
-                    print!("> ");
-                    io::stdout().flush();
+                    print!("{}>{} ", OK_BLUE_CODE, CLEAR_COLOR);
+                    io::stdout().flush().unwrap();
                 },
                 Err(er) => {
                     println!("Unable to read from stdin! {}", er);
