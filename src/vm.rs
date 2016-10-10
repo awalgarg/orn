@@ -42,6 +42,10 @@ pub enum OrnVal {
     Int(i32),
     Float(f64),
     Bool(bool),
+    Array {
+        data_type: DataType,
+        values: RefCell<Vec<Rc<OrnVal>>>,
+    },
 }
 
 impl fmt::Display for OrnVal {
@@ -70,6 +74,9 @@ impl fmt::Display for OrnVal {
             },
             &OrnVal::Bool(b) => {
                 write!(f, "{}", b)
+            },
+            &OrnVal::Array { ref data_type, ref values } => {
+                write!(f, "[{}:{}]", data_type, values.borrow().len())
             },
         }
     }
@@ -218,6 +225,7 @@ macro_rules! check_value_equality {
             (&OrnVal::Int(ref x), &OrnVal::Int(ref y)) => { x == y },
             (&OrnVal::Float(ref x), &OrnVal::Float(ref y)) => { x == y },
             (x @ &OrnVal::Fn { .. }, y @ &OrnVal::Fn { .. }) => { &*x as *const _ == &*y as *const _ },
+            (x @ &OrnVal::Array { .. }, y @ &OrnVal::Array { .. }) => { &*x as *const _ == &*y as *const _ },
             (&_, &_) => { false },
         }
     }
@@ -423,6 +431,22 @@ impl Stack {
                                     c.push_str(y);
                                     c
                                 })));
+                            },
+                            (&OrnVal::Array { data_type: ref x_type, values: ref x_values }, &OrnVal::Array { data_type: ref y_type, values: ref y_values }) => {
+                                if x_type != y_type {
+                                    return Err(RuntimeError {
+                                        error_type: RuntimeErrorType::TypeError,
+                                        line: line,
+                                        column: column,
+                                        msg: format!("Concatenating arrays requires both to contain the same type of elements! You had types {} and {} which won't work :P", x_type, y_type),
+                                    });
+                                }
+                                let mut new_vec = x_values.borrow().clone();
+                                new_vec.extend(y_values.borrow().clone());
+                                return Ok(Rc::new(OrnVal::Array {
+                                    data_type: x_type.clone(),
+                                    values: RefCell::new(new_vec),
+                                }));
                             },
                             (&OrnVal::UInt(ref x), &OrnVal::UInt(ref y)) => {
                                 return Ok(Rc::new(OrnVal::UInt(x + y)));
@@ -696,6 +720,17 @@ impl Stack {
 
             Expression::BooleanLiteral(b) => {
                 return Ok(Rc::new(OrnVal::Bool(b)));
+            },
+
+            Expression::Array(ref exprs) => {
+                let mut values = vec![];
+                for ref expr in exprs.iter() {
+                    values.push(try!(self.eval_expr(expr)));
+                }
+                return Ok(Rc::new(OrnVal::Array {
+                    data_type: DataType::INFER,
+                    values: RefCell::new(values),
+                }));
             },
 
             Expression::Block(ref block) => {

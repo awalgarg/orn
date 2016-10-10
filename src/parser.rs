@@ -59,6 +59,9 @@ pub enum Expression {
     /// Literal expressions for booleans
     BooleanLiteral(bool),
 
+    /// Literal arrays
+    Array(Vec<ExpressionSource>),
+
     /// Block expressions just hold blocks, which is a type alias for vectors of statements
     Block(Block),
 }
@@ -111,7 +114,7 @@ impl fmt::Display for FunctionParameter {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum DataType {
     UInt,
     Int,
@@ -119,6 +122,7 @@ pub enum DataType {
     Float,
 //    Fn { return_type: Box<DataType>, params: Vec<DataType> },
     Bool,
+    Array(Box<DataType>),
     INFER,
 }
 
@@ -130,6 +134,7 @@ impl fmt::Display for DataType {
             &DataType::Str => { write!(f, "str") },
             &DataType::Float => { write!(f, "float") },
             &DataType::Bool => { write!(f, "bool") },
+            &DataType::Array(ref dt) => { write!(f, "[{}]", dt) },
             &DataType::INFER => { write!(f, "infer") },
         }
     }
@@ -573,6 +578,27 @@ impl<'a> Parser<'a> {
                     line: line,
                     column: column,
                     expr: Expression::Block(try!(self.continue_block_stmt())),
+                }
+            },
+            Some(&Token::Punctuator('[')) => {
+                self.lexer.next();
+                // array expression
+                let mut exprs = vec![];
+                loop {
+                    if let Some(&Token::Punctuator(']')) = self.lexer.peek().map(extract_token_ref) {
+                        self.lexer.next();
+                        break;
+                    }
+                    if let Some(&Token::Punctuator(',')) = self.lexer.peek().map(extract_token_ref) {
+                        self.lexer.next();
+                        continue;
+                    }
+                    exprs.push(try!(self.match_expression()));
+                }
+                ExpressionSource {
+                    line: line,
+                    column: column,
+                    expr: Expression::Array(exprs),
                 }
             },
             Some(&Token::Keyword(Keyword::If)) => {
