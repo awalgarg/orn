@@ -75,8 +75,8 @@ impl fmt::Display for OrnVal {
             &OrnVal::Bool(b) => {
                 write!(f, "{}", b)
             },
-            &OrnVal::Array { ref data_type, ref values } => {
-                write!(f, "[{}:{}]", data_type, values.borrow().len())
+            &OrnVal::Array { ref values, .. } => {
+                write!(f, "[{}]", values.borrow().iter().map(|x| x.to_string()).collect::<Vec<_>>().join(", "))
             },
         }
     }
