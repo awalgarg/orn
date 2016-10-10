@@ -92,7 +92,9 @@ pub struct Stack {
     /// The call_stack vector stores a stack of function names we are presently
     /// executing under.
     /// When a function exits scope, its name is removed from the call stack.
-    pub call_stack: Vec<(u32, u32, String)>,
+    /// Stored in a refcell because the call_stack is globally shared across
+    /// all function calls.
+    pub call_stack: Rc<RefCell<Vec<(u32, u32, String)>>>,
 }
 
 /// We use enums instead of strings here because I think enums take lesser space
@@ -233,7 +235,11 @@ impl Stack {
     ///
     /// To evaluate things in the context of this stack, use Stack.eval_expr or Stack.eval_stmt
     pub fn new() -> Stack {
-        Stack { frames: vec![Rc::new(RefCell::new(StackFrame::new()))], call_stack: Vec::new() }
+        Stack { frames: vec![Rc::new(RefCell::new(StackFrame::new()))], call_stack: Rc::new(RefCell::new(Vec::new())) }
+    }
+
+    fn new_child(call_stack: Rc<RefCell<Vec<(u32, u32, String)>>>) -> Stack {
+        Stack { frames: vec![Rc::new(RefCell::new(StackFrame::new()))], call_stack: call_stack }
     }
 
     /// Adds a binding to the top most frame in the current stack
@@ -623,7 +629,7 @@ impl Stack {
                     // if it is indeed a function...
                     &OrnVal::Fn { ref params, ref body, ref identifier, ref env, ref line, ref column, .. } => {
                         // push function name and location to call stack
-                        self.call_stack.push((*line, *column, identifier.to_string()));
+                        self.call_stack.borrow_mut().push((*line, *column, identifier.to_string()));
 
                         // assert adequate number of arguments are passed
                         assert_eq!(args.len(), params.len());
@@ -642,8 +648,8 @@ impl Stack {
                             call_frame.scope.insert(param.name.clone(), OrnBinding { mutable: false, val: try!(self.eval_expr(arg)) });
                         }
 
-                        // create a new stack for execution
-                        let mut stack = Stack::new();
+                        // create a new child stack for execution
+                        let mut stack = Stack::new_child(self.call_stack.clone());
 
                         // restore environment of function to where it was declared
                         for frame in env.iter() {
@@ -661,7 +667,7 @@ impl Stack {
                         }
 
                         // remove the added entry to call stack before exiting
-                        self.call_stack.pop();
+                        self.call_stack.borrow_mut().pop();
                         return Ok(res);
                     },
                     ref crap => {
@@ -736,11 +742,11 @@ impl Stack {
                             // bad user :(
                             let mut err_buf = String::new();
                             // the error which occured
-                            err_buf.push_str(&format!("{}:{} {}: {}", o.line, o.column, o.error_type, o.msg));
+                            err_buf.push_str(&format!("{}:{} {}: {}\n", o.line, o.column, o.error_type, o.msg));
 
                             // and stack trace which took us so far
-                            for &(line, column, ref func) in &self.call_stack {
-                                err_buf.push_str(&format!("{}:{} at function {}", line, column, func));
+                            for &(line, column, ref func) in self.call_stack.as_ref().borrow().iter() {
+                                err_buf.push_str(&format!("{}:{} at function {}\n", line, column, func));
                             }
 
                             return Err(err_buf);

@@ -124,7 +124,7 @@ fn main() {
                         println!("{}:{}:{} {}: {}", filename, o.line, o.column, o.error_type, o.msg);
 
                         // and stack trace which took us so far
-                        for (line, column, func) in stack.call_stack {
+                        for &(line, column, ref func) in stack.call_stack.as_ref().borrow().iter() {
                             println!("{}:{}:{} at function {}", filename, line, column, func);
                         }
                         
