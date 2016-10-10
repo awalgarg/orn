@@ -1,4 +1,4 @@
-use parser::{ Statement, Expression, ExpressionSource, Block, BinaryOperator, UnaryOperator, FunctionParameter, DataType };
+use parser::{ Statement, Expression, ExpressionSource, Block, BinaryOperator, UnaryOperator, FunctionParameter, DataType, Parser };
 use std::rc::Rc;
 use std::cell::Ref;
 use std::cell::RefCell;
@@ -716,5 +716,44 @@ impl Stack {
         // remove frame from the execution context
         self.frames.pop();
         return ret;
+    }
+
+    pub fn eval(&mut self, code: &String) -> Result<Rc<OrnVal>, String> {
+        // create parse stream
+        let p = Parser::new(&code);
+
+        let mut res = Rc::new(OrnVal::Bool(false));
+        // start parsing!
+        for stmt in p {
+            match stmt {
+                Ok(stmt) => {
+                    // evaluate as they come!
+                    match self.eval_stmt(&stmt) {
+                        Ok(val) => {
+                            res = val;
+                        },
+                        Err(o) => {
+                            // bad user :(
+                            let mut err_buf = String::new();
+                            // the error which occured
+                            err_buf.push_str(&format!("{}:{} {}: {}", o.line, o.column, o.error_type, o.msg));
+
+                            // and stack trace which took us so far
+                            for &(line, column, ref func) in &self.call_stack {
+                                err_buf.push_str(&format!("{}:{} at function {}", line, column, func));
+                            }
+
+                            return Err(err_buf);
+                        },
+                    }
+                },
+                Err(o) => {
+                    // why people no write code properly :(
+                    return Err(format!("{}:{} SyntaxError: {}", o.line, o.column, o.msg));
+                },
+            }
+        }
+
+        return Ok(res);
     }
 }

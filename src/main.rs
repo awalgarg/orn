@@ -7,6 +7,7 @@ use std::env;
 use std::path::Path;
 use std::io::prelude::*;
 use std::fs::File;
+use std::io;
 use parser::Parser;
 use vm::Stack;
 
@@ -16,6 +17,32 @@ fn main() {
 
     // if second arg was not passed
     if args.len() < 2 {
+        // drop to a repl
+        println!("Welcome to the orn repl. Autocompletion and history are a WIP. Use Ctrl+C to exit. Enjoy!");
+        print!("> ");
+        io::stdout().flush();
+        let mut stack = Stack::new();
+        loop {
+            let mut input = String::new();
+            match io::stdin().read_line(&mut input) {
+                Ok(_) => {
+                    match stack.eval(&input) {
+                        Ok(val) => { println!("{}", val); },
+                        Err(er) => { println!("{}", er); },
+                    }
+                    print!("> ");
+                    io::stdout().flush();
+                },
+                Err(er) => {
+                    println!("Unable to read from stdin! {}", er);
+                    process::exit(1);
+                },
+            }
+        }
+    }
+
+    // if user wanted some help
+    if &args[1] == "--help" {
         // print information about us :D :D
         println!(
 "
@@ -35,7 +62,9 @@ fn main() {
       0.0.1
   
   Usage
-      orn path/to/code.orn
+      orn path/to/code.orn # evaluates code.orn
+      orn # launches a repl
+      orn --help # prints this message
   
   Notes
     Please report issues/bugs/feature requests or send patches on Github
