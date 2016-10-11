@@ -47,6 +47,9 @@ pub enum Expression {
     /// Denotes a reference
     Reference(String),
 
+    /// Member expression
+    Member { parent: Box<ExpressionSource>, member: String },
+
     /// A call expression is denoted by a callee expression and the arguments to be passed to it
     Call { callee: Box<ExpressionSource>, args: Vec<ExpressionSource> },
 
@@ -731,6 +734,19 @@ impl<'a> Parser<'a> {
                             });
                         }
                     }
+                },
+                Some(&Token::Punctuator('.')) => {
+                    // member expression. I dunno what
+                    self.lexer.next();
+                    let member = expect_identifier!(self, "Member expression must define a member to access!");
+                    expr = ExpressionSource {
+                        line: line,
+                        column: column,
+                        expr: Expression::Member {
+                            parent: Box::new(expr),
+                            member: member,
+                        },
+                    };
                 },
                 Some(&Token::Punctuator(ch)) if ch == '+' || ch == '-' || ch == '*' || ch == '/' || ch == '%' || ch == '>' || ch == '<' || ch == '|' || ch == '&' || ch == '!' => {
                     // binary expression

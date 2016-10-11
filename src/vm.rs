@@ -1,4 +1,5 @@
 use parser::{ Statement, Expression, ExpressionSource, Block, BinaryOperator, UnaryOperator, FunctionParameter, DataType, Parser };
+use stdlib::get_amazing_orn_stdlib_as_stackframe;
 use std::rc::Rc;
 use std::cell::Ref;
 use std::cell::RefCell;
@@ -18,9 +19,9 @@ use std::ops::{ Sub, Mul, Div, Rem };
 /// and access.
 pub struct OrnBinding {
     /// Indicates whether the binding is mutable or not
-    mutable: bool,
+    pub mutable: bool,
     /// Rc reference to the value pointed at by this binding
-    val: Rc<OrnVal>,
+    pub val: Rc<OrnVal>,
 }
 
 /// OrnVal is the generic container for all kinds of types of values that
@@ -45,6 +46,11 @@ pub enum OrnVal {
     Array {
         data_type: DataType,
         values: RefCell<Vec<Rc<OrnVal>>>,
+    },
+    Mod(HashMap<String, Rc<OrnVal>>),
+    BuiltIn {
+        identifier: String,
+        func: fn(&mut Stack, Vec<Rc<OrnVal>>) -> Result<Rc<OrnVal>, RuntimeError>,
     },
 }
 
@@ -78,6 +84,12 @@ impl fmt::Display for OrnVal {
             &OrnVal::Array { ref values, .. } => {
                 write!(f, "[{}]", values.borrow().iter().map(|x| x.to_string()).collect::<Vec<_>>().join(", "))
             },
+            &OrnVal::Mod(ref module) => {
+                write!(f, "<inbuilt module>")
+            },
+            &OrnVal::BuiltIn { ref identifier, .. } => {
+                write!(f, "<builtin function {}>", identifier)
+            },
         }
     }
 }
@@ -86,7 +98,7 @@ impl fmt::Display for OrnVal {
 /// things in future, but presently we only put bindings of a scope in it.
 pub struct StackFrame {
     /// The hashmap storing bindings by their names
-    scope: HashMap<String, OrnBinding>,
+    pub scope: HashMap<String, OrnBinding>,
 }
 
 /// A stack is a stack of frames. Everytime a scope is entered, a stackframe
@@ -243,7 +255,10 @@ impl Stack {
     ///
     /// To evaluate things in the context of this stack, use Stack.eval_expr or Stack.eval_stmt
     pub fn new() -> Stack {
-        Stack { frames: vec![Rc::new(RefCell::new(StackFrame::new()))], call_stack: Rc::new(RefCell::new(Vec::new())) }
+        Stack {
+            frames: vec![Rc::new(RefCell::new(get_amazing_orn_stdlib_as_stackframe()))],
+            call_stack: Rc::new(RefCell::new(Vec::new())),
+        }
     }
 
     fn new_child(call_stack: Rc<RefCell<Vec<(u32, u32, String)>>>) -> Stack {
@@ -634,75 +649,40 @@ impl Stack {
                 });
             },
 
+            Expression::Member { ref parent, ref member } => {
+                let parent = try!(self.eval_expr(parent));
+                match parent.borrow() {
+                    &OrnVal::Mod(ref module) => {
+                        // TODO: check unwrap
+                        Ok(module.get(member).unwrap().clone())
+                    },
+                    parent => {
+                        Err(RuntimeError {
+                            error_type: RuntimeErrorType::ReferenceError,
+                            line: line,
+                            column: column,
+                            msg: format!("Only modules have properties as of now. {} doesn't :)", parent),
+                        })
+                    },
+                }
+            },
+
             Expression::Call { callee, args } => {
-                // TODO: lol this is a terrible hack
-                // FIXME when we get a real standard library
-                match callee.as_ref().expr {
-                    Expression::Reference(ref x) if x == "echo" => {
-                        for arg in args.iter() {
-                            println!("{}", try!(self.eval_expr(arg)));
-                        }
-                        return Ok(Rc::new(OrnVal::Bool(false)));
-                    },
-                    _ => {},
-                };
-
-                // evaluate callee to obtain reference to function
-                let f = try!(self.eval_expr(callee.borrow()));
-                match f.borrow() {
-                    // if it is indeed a function...
-                    &OrnVal::Fn { ref params, ref body, ref identifier, ref env, ref line, ref column, .. } => {
-                        // push function name and location to call stack
-                        self.call_stack.borrow_mut().push((*line, *column, identifier.to_string()));
-
-                        // assert adequate number of arguments are passed
-                        assert_eq!(args.len(), params.len());
-
-                        // TODO: type check parameter types to match arguments passed!
-
-                        // create a new stack frame for storing arguments and a reference to the
-                        // function itself
-                        let mut call_frame = StackFrame::new();
-                        // TODO: also add function itself to this frame to allow recursion in
-                        // function expressions
-
-                        // push each argument passed by its name from the corresponding parameter
-                        // to the above frame
-                        for (arg, param) in args.iter().zip(params.iter()) {
-                            call_frame.scope.insert(param.name.clone(), OrnBinding { mutable: false, val: try!(self.eval_expr(arg)) });
-                        }
-
-                        // create a new child stack for execution
-                        let mut stack = Stack::new_child(self.call_stack.clone());
-
-                        // restore environment of function to where it was declared
-                        for frame in env.iter() {
-                            stack.frames.push(frame.clone());
-                        }
-
-                        // add our argument frame to the above stack
-                        stack.frames.push(Rc::new(RefCell::new(call_frame)));
-
-                        // start execution and record result of each statement (to return last one
-                        // in the end)
-                        let mut res = Rc::new(OrnVal::Bool(false));
-                        for stmt in body.iter() {
-                            res = try!(stack.eval_stmt(stmt));
-                        }
-
-                        // remove the added entry to call stack before exiting
-                        self.call_stack.borrow_mut().pop();
-                        return Ok(res);
-                    },
+                let (func, args) = try!(self.desugar_call_expr(&callee, args));
+                match func.borrow() {
+                    &OrnVal::Fn { .. } => { /* fine */ },
+                    &OrnVal::BuiltIn { .. } => { /* fine too */ },
                     ref crap => {
+                        // heathens
                         return Err(RuntimeError {
                             error_type: RuntimeErrorType::TypeError,
                             line: line,
                             column: column,
-                            msg: format!("Uhm, {} is not a function.", crap),
+                            msg: format!("{} is not a function. y u no get it >:(", crap),
                         });
-                    }
+                    },
                 }
+                self.call_user_func(func, args)
             },
 
             Expression::StringLiteral(ref s) => {
@@ -757,6 +737,178 @@ impl Stack {
         // remove frame from the execution context
         self.frames.pop();
         return ret;
+    }
+
+    /// Given the parts of a call expression, this function desugars them if the callee is a member
+    /// expression which needs to desugar
+    ///
+    /// i.e., it converts foo.bar(...) to <Type(foo)>.bar(foo, ...). It leaves the other things
+    /// alone and the return type is a tuple containing an ornval which is guaranteed to be either
+    /// of the variant Fn or BuiltIn, and a vector of ornvals to pass to the function.
+    pub fn desugar_call_expr(&mut self, callee: &ExpressionSource, args: Vec<ExpressionSource>)
+        -> Result<(Rc<OrnVal>, Vec<Rc<OrnVal>>), RuntimeError>
+    {
+        let line = callee.line;
+        let column = callee.column;
+
+        // helper to evaluate arguments since we need to optionally mutate them later on when we
+        // push the "context" caller at the start
+        macro_rules! eval_args {
+            ($self_:ident, $args:expr) => {
+                {
+                    // this cannot use map because then the try! macro will return from the map
+                    // callback and we'd end up with an array of Results instead of a proper array
+                    // of arguments.
+                    let mut evaled_args = Vec::new();
+                    for arg in args.iter() {
+                        evaled_args.push(try!(self.eval_expr(arg)));
+                    }
+                    evaled_args
+                }
+            }
+        }
+
+        // the fun begins!
+        match (*callee).expr.clone() {
+            // if this is a member expression
+            Expression::Member { parent, member } => {
+                // try evaluating the parent first
+                let paren = try!(self.eval_expr(parent.borrow()));
+
+                // if the parent is an orn module...
+                if let &OrnVal::Mod(ref module) = paren.borrow() {
+                    // TODO: remove unwrap
+                    // we call the method as a static function as is and no need to desugar
+                    // anything at all
+                    Ok((module.get(&member).unwrap().clone(), eval_args!(self, args)))
+                } else {
+                    // otherwise, we first find what global "module" corresponds to the value on
+                    // which this method was called.
+                    let module_name = match paren.borrow() {
+                        &OrnVal::Bool(_) => { "Bool" },
+                        &OrnVal::Str(_) => { "Str" },
+                        &OrnVal::Array { .. } => { "Array" },
+                        &OrnVal::UInt(_) => { "UInt" },
+                        &OrnVal::Int(_) => { "Int" },
+                        &OrnVal::Float(_) => { "Float" },
+                        &OrnVal::Fn { .. } | &OrnVal::BuiltIn { .. } => { "Fn" },
+                        &OrnVal::Mod(_) => { unreachable!(); },
+                    };
+
+                    // we retrieve that module from the global scope
+                    let ref module_ornval = self
+                                    .frames
+                                    .get(0)
+                                    .expect("Getting global environment for extraction of prototype")
+                                    .as_ref()
+                                    .borrow()
+                                    .scope
+                                    .get(module_name)
+                                    .expect("Getting prototype from global environment")
+                                    .borrow()
+                                    .val.clone();
+
+                    // ensure that it is a module not something else which got meddled with
+                    let module = match module_ornval.as_ref() {
+                        &OrnVal::Mod(ref module) => { module },
+                        _ => { unreachable!(); },
+                    };
+
+                    // and retrieve the function from that module which was called
+                    let func = module.get(&member).unwrap().clone(); // TODO: remove unwrap
+
+                    // if the method is valid, we now evaluate the arguments
+                    let mut evaled_args = eval_args!(self, args);
+
+                    // and push the "context" object to the front of the arguments array
+                    evaled_args.insert(0, paren.clone());
+
+                    // and return our desugared result!
+                    Ok((func, evaled_args))
+                }
+            },
+
+            // the following expressions can never return callable functions, hence we error out
+            // early on these
+            Expression::BooleanLiteral(_) | Expression::StringLiteral(_) | Expression::NumberLiteral(_) | Expression::Unary { .. } | Expression::Array(_) => {
+                Err(RuntimeError {
+                    error_type: RuntimeErrorType::TypeError,
+                    line: line,
+                    column: column,
+                    msg: format!("Random crap is not a valid function. FFS people, stop being retards."),
+                })
+            },
+
+            // for all other expressions, we don't need desugaring but they might still be valid
+            // functions
+            expr => {
+                Ok((try!(self.eval_expr(&callee)), eval_args!(self, args)))
+            },
+        }
+    }
+
+    /// Calls a function with the given arguments. Both builtins and userland functions are
+    /// acceptable. Anything else will return a RuntimeError::TypeError
+    pub fn call_user_func(&mut self, val: Rc<OrnVal>, args: Vec<Rc<OrnVal>>) -> Result<Rc<OrnVal>, RuntimeError> {
+        match val.borrow() {
+            &OrnVal::Fn { ref params, ref body, ref identifier, ref env, ref line, ref column, .. } => {
+                // push function name and location to call stack
+                self.call_stack.borrow_mut().push((*line, *column, identifier.to_string()));
+
+                // assert adequate number of arguments are passed
+                assert_eq!(args.len(), params.len());
+
+                // TODO: type check parameter types to match arguments passed!
+
+                // create a new stack frame for storing arguments and a reference to the
+                // function itself
+                let mut call_frame = StackFrame::new();
+                // TODO: also add function itself to this frame to allow recursion in
+                // function expressions
+
+                // push each argument passed by its name from the corresponding parameter
+                // to the above frame
+                for (arg, param) in args.into_iter().zip(params.iter()) {
+                    call_frame.scope.insert(param.name.clone(), OrnBinding { mutable: false, val: arg });
+                }
+
+                // create a new child stack for execution
+                let mut stack = Stack::new_child(self.call_stack.clone());
+
+                // restore environment of function to where it was declared
+                for frame in env.iter() {
+                    stack.frames.push(frame.clone());
+                }
+
+                // add our argument frame to the above stack
+                stack.frames.push(Rc::new(RefCell::new(call_frame)));
+
+                // start execution and record result of each statement (to return last one
+                // in the end)
+                let mut res = Rc::new(OrnVal::Bool(false));
+                for stmt in body.iter() {
+                    res = try!(stack.eval_stmt(stmt));
+                }
+
+                // remove the added entry to call stack before exiting
+                self.call_stack.borrow_mut().pop();
+                Ok(res)
+            },
+            &OrnVal::BuiltIn { ref identifier, ref func } => {
+                self.call_stack.borrow_mut().push((0, 0, identifier.to_string()));
+                let res = try!(func(self, args));
+                self.call_stack.borrow_mut().pop();
+                Ok(res)
+            },
+            val => {
+                Err(RuntimeError {
+                    error_type: RuntimeErrorType::TypeError,
+                    line: 0,
+                    column: 0,
+                    msg: format!("{} is not a function", val),
+                })
+            },
+        }
     }
 
     pub fn eval(&mut self, code: &String) -> Result<Rc<OrnVal>, String> {

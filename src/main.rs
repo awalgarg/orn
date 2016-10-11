@@ -1,6 +1,7 @@
 mod parser;
 mod lexer;
 mod vm;
+mod stdlib;
 
 use std::process;
 use std::env;
