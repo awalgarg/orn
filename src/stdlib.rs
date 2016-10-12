@@ -59,7 +59,7 @@ fn array_each(stack: &mut Stack, vec: Vec<Rc<OrnVal>>) -> BuiltInReturn {
     Ok(Rc::new(OrnVal::Bool(false)))
 }
 
-fn array_len(stack: &mut Stack, vec: Vec<Rc<OrnVal>>) -> BuiltInReturn {
+fn array_len(_: &mut Stack, vec: Vec<Rc<OrnVal>>) -> BuiltInReturn {
     let arr = expect_argument_type!(vec.iter(), &OrnVal::Array { ref values, .. }, { values }, "Array.len expects an array!");
     Ok(Rc::new(OrnVal::UInt(arr.borrow().len() as u32)))
 }
@@ -78,7 +78,7 @@ fn exec(_: &mut Stack, vec: Vec<Rc<OrnVal>>) -> BuiltInReturn {
         .arg("-c")
         .arg(program)
         .stdout(Stdio::piped());
-    let mut p = cmd.spawn().unwrap();
+    let p = cmd.spawn().unwrap();
     return Ok(Rc::new(OrnVal::Str(String::from_utf8(p.wait_with_output().unwrap().stdout).unwrap())));
 }
 

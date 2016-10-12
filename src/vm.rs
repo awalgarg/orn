@@ -84,7 +84,7 @@ impl fmt::Display for OrnVal {
             &OrnVal::Array { ref values, .. } => {
                 write!(f, "[{}]", values.borrow().iter().map(|x| x.to_string()).collect::<Vec<_>>().join(", "))
             },
-            &OrnVal::Mod(ref module) => {
+            &OrnVal::Mod(_) => {
                 write!(f, "<inbuilt module>")
             },
             &OrnVal::BuiltIn { ref identifier, .. } => {
@@ -337,7 +337,7 @@ impl Stack {
                     },
                 }
             },
-            Statement::Let { mutable, identifier, data_type, initializer } => {
+            Statement::Let { mutable, identifier, initializer, .. } => {
                 let val = try!(self.eval_expr(&initializer));
                 // note that we don't do existance check before let bindings are allowed to
                 // overwrite each other, just like in rust.
@@ -870,7 +870,7 @@ impl Stack {
 
             // for all other expressions, we don't need desugaring but they might still be valid
             // functions
-            expr => {
+            _ => {
                 Ok((try!(self.eval_expr(&callee)), eval_args!(self, args)))
             },
         }
