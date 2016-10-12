@@ -254,6 +254,7 @@ impl<'a> Iterator for Lexer<'a> {
                                       ch == '%' ||
                                       ch == '|' ||
                                       ch == '&' ||
+                                      ch == '$' ||
                                       ch == '`' {
                                 return Some(wrap_as_lexeme!(self, Token::Punctuator(ch)));
                             } else if ch == '#' {
@@ -295,23 +296,24 @@ impl<'a> Iterator for Lexer<'a> {
                         },
                         LexerState::NumberLiteral { decimal } => {
                             if ch.is_digit(10) {
-                                if decimal == 1 { // we last saw a decimal, but now we have a number
-                                    self.accepting = LexerState::NumberLiteral { decimal: 2 }; // signify that things are cool now
-                                }
                                 self.buffer.push(ch);
+                                // if the last character we saw was a decimal
+                                if decimal == 1 {
+                                    // then we have succesfully parsed atleast part of a decimal
+                                    // number
+                                    self.accepting = LexerState::NumberLiteral { decimal: 2 };
+                                }
                             } else if ch == '.' {
                                 if decimal > 0 { // already seen a decimal!
-                                    // TODO: handle error properly
-                                    panic!("too many decimals in number literal lol");
+                                    // in the next iteration, this period will be seen as a punctuator
+                                    // forming part of a member expression (1..to_string())
+                                    self.scanner.rewind();
+                                    self.accepting = LexerState::Idle;
+                                    return Some(wrap_as_lexeme!(self, Token::NumberLiteral(self.dump_buffer())));
                                 } else {
                                     self.buffer.push(ch);
                                     self.accepting = LexerState::NumberLiteral { decimal: 1 }; // signify that we last saw a decimal
                                 }
-                            } else if decimal == 1 { // if last seen was a decimal
-                                // we don't allow 4. as a valid number because that makes little
-                                // sense, neither is .4 allowed. Use 4.0 and 0.4 respectively.
-                                // TODO: handle error properly
-                                panic!("expected some numerals after the decimal y u leave me alone");
                             } else {
                                 self.scanner.rewind();
                                 self.accepting = LexerState::Idle;
@@ -344,8 +346,15 @@ impl<'a> Iterator for Lexer<'a> {
                     match self.accepting {
                         LexerState::Idle => return None, // terminate lexing machine
                         LexerState::StringLiteral { .. } => {
-                            // TODO: handle error properly
-                            panic!("Unexpected EOF. Da hell man?");
+                            // this is kinda odd, but our lexer forgives the ommission of a closing
+                            // quote. this is not that big of an issue because a simple string
+                            // literal at the end of the file is basically a no-op anyways. in
+                            // expression context, the parser will catch this and throw
+                            // This is mostly noticeable in a repl, when a user would expect
+                            // continuation to catchup and let him enter a multiline string.
+                            // We should probably handle that on the repl end though
+                            self.accepting = LexerState::Idle;
+                            return Some(wrap_as_lexeme!(self, Token::StringLiteral(self.dump_buffer())));
                         },
                         LexerState::NumberLiteral { .. } => {
                             self.accepting = LexerState::Idle;
