@@ -27,29 +27,29 @@ macro_rules! expect_argument_type {
     }
 }
 
-fn array_each(stack: &mut Stack, vec: Vec<Rc<OrnVal>>) -> Result<Rc<OrnVal>, RuntimeError> {
-    let arr = match vec.get(0).map(|x| x.as_ref()) {
-        Some(&OrnVal::Array { ref values, .. }) => { values },
-        _ => {
-            return Err(RuntimeError {
-                error_type: RuntimeErrorType::TypeError,
-                line: 0, 
-                column: 0,
-                msg: format!("Array.forEach expected an array. Gimme array or gtfo."),
-            });
-        },
-    };
-    let callback = match vec.get(1) {
-        Some(x) => { x },
-        None => {
-            return Err(RuntimeError {
-                error_type: RuntimeErrorType::TypeError,
-                line: 0,
-                column: 0,
-                msg: format!("Array.forEach expects a function too..."),
-            });
-        },
-    };
+macro_rules! expect_any_argument {
+    ($iter:expr, $failure_msg:expr) => {
+        match $iter.next() {
+            Some(x) => { x },
+            None => {
+                return Err(RuntimeError {
+                    error_type: RuntimeErrorType::TypeError,
+                    line: 0,
+                    column: 0,
+                    msg: format!("Expected argument not passed. {}", $failure_msg),
+                });
+            },
+        }
+    }
+}
+
+type BuiltInReturn = Result<Rc<OrnVal>, RuntimeError>;
+
+fn array_each(stack: &mut Stack, vec: Vec<Rc<OrnVal>>) -> BuiltInReturn {
+    let mut args_iter = vec.iter();
+    let arr = expect_argument_type!(args_iter, &OrnVal::Array { ref values, .. }, { values }, "Array.each expects an array. Gimme array or gtfo");
+    let callback = expect_any_argument!(args_iter, "Array.each expects a function too...");
+
     for elem in arr.borrow().iter() {
         match stack.call_user_func(callback.clone(), vec![elem.clone()]) {
             Ok(_) => {},
@@ -59,14 +59,19 @@ fn array_each(stack: &mut Stack, vec: Vec<Rc<OrnVal>>) -> Result<Rc<OrnVal>, Run
     Ok(Rc::new(OrnVal::Bool(false)))
 }
 
-fn echo(_: &mut Stack, vec: Vec<Rc<OrnVal>>) -> Result<Rc<OrnVal>, RuntimeError> {
+fn array_len(stack: &mut Stack, vec: Vec<Rc<OrnVal>>) -> BuiltInReturn {
+    let arr = expect_argument_type!(vec.iter(), &OrnVal::Array { ref values, .. }, { values }, "Array.len expects an array!");
+    Ok(Rc::new(OrnVal::UInt(arr.borrow().len() as u32)))
+}
+
+fn echo(_: &mut Stack, vec: Vec<Rc<OrnVal>>) -> BuiltInReturn {
     for arg in vec.iter() {
         println!("{}", arg);
     }
     Ok(Rc::new(OrnVal::Bool(false)))
 }
 
-fn exec(_: &mut Stack, vec: Vec<Rc<OrnVal>>) -> Result<Rc<OrnVal>, RuntimeError> {
+fn exec(_: &mut Stack, vec: Vec<Rc<OrnVal>>) -> BuiltInReturn {
     let program = expect_argument_type!(vec.iter(), &OrnVal::Str(ref x), { x.to_string() }, "exec takes first argument as string bro");
     let mut cmd = Command::new("sh");
     cmd
@@ -109,7 +114,8 @@ pub fn get_amazing_orn_stdlib_as_stackframe() -> StackFrame {
     add_module!(
         frame,
         Array,
-        each [ array_each ]
+        each [ array_each ],
+        len [ array_len ]
     );
 
     add_module!(
