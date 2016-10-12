@@ -262,7 +262,7 @@ impl Stack {
     }
 
     fn new_child(call_stack: Rc<RefCell<Vec<(u32, u32, String)>>>) -> Stack {
-        Stack { frames: vec![Rc::new(RefCell::new(StackFrame::new()))], call_stack: call_stack }
+        Stack { frames: vec![], call_stack: call_stack }
     }
 
     /// Adds a binding to the top most frame in the current stack
