@@ -653,8 +653,17 @@ impl Stack {
                 let parent = try!(self.eval_expr(parent));
                 match parent.borrow() {
                     &OrnVal::Mod(ref module) => {
-                        // TODO: check unwrap
-                        Ok(module.get(member).unwrap().clone())
+                        match module.get(member) {
+                            Some(mem) => { Ok(mem.clone()) },
+                            None => {
+                                Err(RuntimeError {
+                                    error_type: RuntimeErrorType::ReferenceError,
+                                    line: line,
+                                    column: column,
+                                    msg: format!("There is no property {} on this thing!", member),
+                                })
+                            }
+                        }
                     },
                     parent => {
                         Err(RuntimeError {
@@ -777,10 +786,20 @@ impl Stack {
 
                 // if the parent is an orn module...
                 if let &OrnVal::Mod(ref module) = paren.borrow() {
-                    // TODO: remove unwrap
                     // we call the method as a static function as is and no need to desugar
                     // anything at all
-                    Ok((module.get(&member).unwrap().clone(), eval_args!(self, args)))
+                    let func = match module.get(&member) {
+                        Some(mem) => { mem.clone() },
+                        None => {
+                            return Err(RuntimeError {
+                                error_type: RuntimeErrorType::ReferenceError,
+                                line: line,
+                                column: column,
+                                msg: format!("No method {} found :|", member),
+                            });
+                        },
+                    };
+                    Ok((func, eval_args!(self, args)))
                 } else {
                     // otherwise, we first find what global "module" corresponds to the value on
                     // which this method was called.
@@ -815,7 +834,17 @@ impl Stack {
                     };
 
                     // and retrieve the function from that module which was called
-                    let func = module.get(&member).unwrap().clone(); // TODO: remove unwrap
+                    let func = match module.get(&member) {
+                        Some(mem) => { mem.clone() },
+                        None => {
+                            return Err(RuntimeError {
+                                error_type: RuntimeErrorType::ReferenceError,
+                                line: line,
+                                column: column,
+                                msg: format!("No method {} found :|", member),
+                            });
+                        },
+                    };
 
                     // if the method is valid, we now evaluate the arguments
                     let mut evaled_args = eval_args!(self, args);
